@@ -1,0 +1,482 @@
+---
+title: "Bayesian Data Analytics on NASA software projects dataset (For Data Science
+  and Software Engineering (CSC 578A) - Assignment 2"
+author: "Anuinder Sekhon (V01022326) and Sri Surya Jitendra Palaparty (V01022218)"
+date: 'Version: `r Sys.time()`'
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Initial setup
+
+```{r, message=FALSE, warning=FALSE, include=FALSE}
+
+#install.packages(c("coda","mvtnorm","devtools","loo", "here", "foreign","dagitty", "posterior","bayesplot"))
+#devtools::install_github("rmcelreath/rethinking")
+
+#install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+#install_cmdstan(cores = 4)
+
+set.seed(100)
+```
+
+# Load necessary libraries
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+library(RWeka)
+library(rethinking)
+library(posterior)
+library(rstanarm)
+library(rstan)
+library(tidyverse)
+library(ggplot2)
+library(bayesplot)
+library(foreign)
+library(here)
+library(coda)
+library(mvtnorm)
+library(devtools)
+library(loo)
+library(dagitty)
+library(cmdstanr)
+library(dplyr)
+library(tidyverse)
+library(GGally)
+library(vioplot)
+library(MASS)
+library(ggdag)
+library(bnlearn)
+```
+
+Question 1:
+
+# Reading csv
+
+```{r}
+
+nasa_df <- read.csv("nasa93_subset.csv")
+ 
+```
+
+# Descriptive statistics
+
+```{r}
+
+# Before conversion
+str(nasa_df)
+head(nasa_df)
+summary(nasa_df)
+
+# Convert categorical variables into numeric
+nasa_df <- nasa_df %>%
+  mutate(
+    cat2 = as.numeric(as.factor(cat2)),
+    cplx = as.numeric(as.factor(cplx)),
+    acap = as.numeric(as.factor(acap)),
+    pcap = as.numeric(as.factor(pcap))
+  )
+
+# Convert to numeric
+nasa_df$year <- as.numeric(nasa_df$year)
+nasa_df$X <- as.numeric(nasa_df$X)
+nasa_df$recordnumber <- as.numeric(nasa_df$recordnumber)
+
+# After conversion
+str(nasa_df)
+head(nasa_df)
+summary(nasa_df)
+
+# Did not normalize because the values are relatively in similar ranges
+
+```
+
+# Data Visualization
+
+```{r}
+
+# Scatter plot and correlation matrix
+ggpairs(nasa_df[, c("cat2","year", "cplx", "acap", "pcap", "act_effort")])
+
+# Violin plot for 'act_effort'
+vioplot(nasa_df$act_effort, col = "skyblue", main = "Violin Plot of act_effort")
+
+# Box plot for 'act_effort'
+boxplot(nasa_df$act_effort, col = "skyblue", main = "Box Plot of act_effort")
+
+# Create a 2x3 grid of plots
+par(mfrow = c(2, 3))
+
+# Bar plot for "cat2"
+cat2_counts <- table(nasa_df$cat2)
+barplot(cat2_counts, col = "skyblue", main = "Bar Plot of cat2")
+
+# Bar plot for "year"
+year_counts <- table(nasa_df$year)
+barplot(year_counts, col = "skyblue", main = "Bar Plot of year")
+
+# Bar plot for "cplx"
+cplx_counts <- table(nasa_df$cplx)
+barplot(cplx_counts, col = "skyblue", main = "Bar Plot of cplx")
+
+# Bar plot for "acap"
+acap_counts <- table(nasa_df$acap)
+barplot(acap_counts, col = "skyblue", main = "Bar Plot of acap")
+
+# Bar plot for "pcap"
+pcap_counts <- table(nasa_df$pcap)
+barplot(pcap_counts, col = "skyblue", main = "Bar Plot of pcap")
+
+```
+
+Question 2:
+
+# Bayesian Analysis
+
+# Likelihoods
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+
+# Using ulam to fit different distributions with different likelihoods
+
+m_normal <- ulam(
+  alist(
+    act_effort ~ normal(mu, sigma),
+    mu <- intercept + beta1 * cat2 + beta2 * year + beta3 * cplx + beta4 * acap + beta5 * pcap,
+    intercept ~ normal(0, 10),
+    beta1 ~ normal(0, 10),
+    beta2 ~ normal(0, 10),
+    beta3 ~ normal(0, 10),
+    beta4 ~ normal(0, 10),
+    beta5 ~ normal(0, 10),
+    sigma ~ exponential(1)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+m_poisson <- ulam(
+  alist(
+    act_effort ~ poisson(lambda),
+    log(lambda) <- intercept + beta1 * cat2 + beta2 * year + beta3 * cplx + beta4 * acap + beta5 * pcap,
+    intercept ~ normal(0, 10),
+    beta1 ~ normal(0, 10),
+    beta2 ~ normal(0, 10),
+    beta3 ~ normal(0, 10),
+    beta4 ~ normal(0, 10),
+    beta5 ~ normal(0, 10)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+m_gamma <- ulam(
+  alist(
+    act_effort ~ gamma(shape, scale),
+    log(shape) <- intercept + beta1 * cat2 + beta2 * year + beta3 * cplx + beta4 * acap + beta5 * pcap,
+    log(scale) <- log_scale,
+    intercept ~ normal(0, 10),
+    beta1 ~ normal(0, 10),
+    beta2 ~ normal(0, 10),
+    beta3 ~ normal(0, 10),
+    beta4 ~ normal(0, 10),
+    beta5 ~ normal(0, 10),
+    log_scale ~ normal(0, 10)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+m_negbinom <- ulam(
+  alist(
+    act_effort ~ neg_binomial_2(mu, phi),
+    log(mu) <- intercept + beta1 * cat2 + beta2 * year + beta3 * cplx + beta4 * acap + beta5 * pcap,
+    log(phi) <- log_phi,
+    intercept ~ normal(0, 10),
+    beta1 ~ normal(0, 10),
+    beta2 ~ normal(0, 10),
+    beta3 ~ normal(0, 10),
+    beta4 ~ normal(0, 10),
+    beta5 ~ normal(0, 10),
+    log_phi ~ normal(0, 10)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+# Model Statistics
+
+precis(m_normal)
+precis(m_poisson)
+precis(m_gamma)
+precis(m_negbinom)
+
+# Pick Negative Binomial as it best fits the data and has an Rhat below 1.01
+
+```
+
+```{r}
+
+# Calculate mean and variance
+
+var(nasa_df$act_effort)
+mean(nasa_df$act_effort)
+
+# Cannot pick Poisson because the mean and variance are quite different
+# Cannot pick Normal because it seems to be a heavy tailed distribution
+# Pick Negative Binomial as it best fits the data and has an Rhat below 1.01
+
+```
+Question 3:
+
+# Priors
+
+```{r}
+
+# Default prior (very high) 
+max(rlnorm(1e5, 0, 10))
+
+# Normal (0,5) (still high)
+max(rlnorm(1e5, 0, 5))
+
+# Normal (0,3) (reasonable)
+max(rlnorm(1e5, 0, 3))
+
+# Normal (0,2) (very low)
+max(rlnorm(1e5, 0, 2))
+
+```
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+
+# Intercept only
+
+# Normal (0,3)
+
+m_negbinom_p1 <- ulam(
+  alist(
+    act_effort ~ neg_binomial_2(mu, phi),
+    log(mu) <- intercept,
+    log(phi) <- log_phi,
+    intercept ~ normal(0, 3),
+    log_phi ~ normal(0, 3)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+# Normal (0,10)
+
+m_negbinom_p2 <- ulam(
+  alist(
+    act_effort ~ neg_binomial_2(mu, phi),
+    log(mu) <- intercept,
+    log(phi) <- log_phi,
+    intercept ~ normal(0, 10),
+    log_phi ~ normal(0, 10)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+precis(m_negbinom_p1)
+precis(m_negbinom_p2)
+
+# Both perform similarly but we pick Normal (0,3) as its closer to max values
+
+```
+
+Question 4 and 5:
+
+# Calculating the posterior
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+
+# Testing models with the selected priors
+
+m_poisson_f <- ulam(
+  alist(
+    act_effort ~ poisson(lambda),
+    log(lambda) <- intercept + beta1 * cat2 + beta2 * year + beta3 * cplx + beta4 * acap + beta5 * pcap,
+    intercept ~ normal(0, 3),
+    beta1 ~ normal(0, 3),
+    beta2 ~ normal(0, 3),
+    beta3 ~ normal(0, 3),
+    beta4 ~ normal(0, 3),
+    beta5 ~ normal(0, 3)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+m_gamma_f <- ulam(
+  alist(
+    act_effort ~ gamma(shape, scale),
+    log(shape) <- intercept + beta1 * cat2 + beta2 * year + beta3 * cplx + beta4 * acap + beta5 * pcap,
+    log(scale) <- log_scale,
+    intercept ~ normal(0, 3),
+    beta1 ~ normal(0, 3),
+    beta2 ~ normal(0, 3),
+    beta3 ~ normal(0, 3),
+    beta4 ~ normal(0, 3),
+    beta5 ~ normal(0, 3),
+    log_scale ~ normal(0, 3)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+m_negbinom_f <- ulam(
+  alist(
+    act_effort ~ neg_binomial_2(mu, phi),
+    log(mu) <- intercept + beta1 * cat2 + beta2 * year + beta3 * cplx + beta4 * acap + beta5 * pcap,
+    log(phi) <- log_phi,
+    intercept ~ normal(0, 3),
+    beta1 ~ normal(0, 3),
+    beta2 ~ normal(0, 3),
+    beta3 ~ normal(0, 3),
+    beta4 ~ normal(0, 3),
+    beta5 ~ normal(0, 3),
+    log_phi ~ normal(0, 3)
+  ),
+  data = nasa_df,
+  cores = 4,
+  chains = 4,
+  cmdstan = TRUE,
+  log_lik = TRUE,
+  iter = 5e3
+)
+
+# Model Statistics
+
+precis(m_poisson_f)
+precis(m_gamma_f)
+precis(m_negbinom_f)
+
+```
+
+# Sanity check of the posterior
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+
+postcheck(m_poisson_f, window=94)
+title("Poisson Model", line = -1.5)
+
+postcheck(m_gamma_f, window=94)
+title("Gamma Model", line = -1.5)
+
+postcheck(m_negbinom_f, window=94)
+title("Negative Binomial Model", line = -1.5)
+
+```
+
+# Model comparisons
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+
+# Compare the models using LOO
+loo_est <- rethinking::compare(m_poisson_f, m_gamma_f, m_negbinom_f, func=LOO)
+
+# Compare the models using WAIC
+waic_est <- rethinking::compare(m_poisson_f, m_gamma_f, m_negbinom_f, func=WAIC)
+
+# Print the comparison results
+print(loo_est)
+print(waic_est)
+
+# Negative Binomial is the best model from these scores
+
+```
+
+Question 6:
+
+# Causal Graph
+
+```{r}
+
+# Create a Bayesian network structure
+dag <- empty.graph(nodes = c("cat2", "year", "cplx", "acap", "pcap", "act_effort"))
+
+# Specify the directed edges
+arcs(dag) <- matrix(c("cat2", "act_effort",
+                      "year", "act_effort",
+                      "cplx", "act_effort",
+                      "acap", "act_effort",
+                      "pcap", "act_effort",
+                      "cat2", "cplx",
+                      "acap", "pcap"), ncol = 2, byrow = TRUE)
+
+# Plot the causal graph
+plot(dag)
+
+```
+Question 7:
+
+# Model Diagnostics
+
+```{r}
+
+# Summary statistics
+
+summary(m_negbinom_f)
+precis(m_negbinom_f)
+
+# Trank plots
+
+selected_vars <- c("mu[90]", "phi", "log_phi", "intercept", "beta1", "beta2", "beta3", "beta4", "beta5")
+
+trankplot(m_negbinom_f, pars = selected_vars )
+
+```
+
+
+# Environment
+
+```{r, eval=FALSE}
+
+#CORES = 4 # set to the number of available CPU cores
+#remotes::install_github("stan-dev/cmdstanr")
+#cmdstanr::install_cmdstan(cores = CORES)
+# you can now run rethinking with cmdstan instead of rstan
+
+```
+
+```{r}
+cmdstanr::cmdstan_version()
+```
+
+```{r}
+print(sessionInfo(), locale=FALSE)
+```
