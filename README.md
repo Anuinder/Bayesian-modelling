@@ -18,6 +18,6 @@ Bayesian analysis to evaluate the software engineering result considering variou
 ![image](https://github.com/Anuinder/Bayesian-modelling/assets/15037299/90c8d5e0-74be-4849-b4f8-57a459ace007)
 
 
-## Requirements
+## Project Requirements
 R 4.3.1
 
